@@ -28,7 +28,7 @@ Warning: This app tells your Kindroid where you are in real-time when you hit ce
 
 **Set automation trigger (arrival at locations)**
 - Select "always allow" when prompted for location services premissions on first run
-- 
+
 <img width="642" height="620" alt="KinLife360__automation_setup" src="https://github.com/user-attachments/assets/0c3af1a3-b74b-40de-9459-b98724112bda" />
 
 ## Customizations
@@ -38,3 +38,5 @@ Warning: This app tells your Kindroid where you are in real-time when you hit ce
          When current location isn't listed in environment variables: 
         📍**<Automated Update:** *[user] is in transit.>*
   
+  <img width="861" height="1035" alt="KinLife360_output_example" src="https://github.com/user-attachments/assets/e2151014-d504-460a-a51e-c07a5b7e6487" />
+
