@@ -55,7 +55,7 @@ function parseLocationMappings() {
 const LOCATION_MAPPINGS = parseLocationMappings();
 
 function findNearestLocation(lat, lon) {
-  const threshold = 0.003; // ~300m radius
+  const threshold = 50; // ~300m radius
   
   for (const loc of LOCATION_MAPPINGS) {
     const distance = Math.sqrt(
