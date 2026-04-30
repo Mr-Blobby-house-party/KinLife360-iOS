@@ -82,11 +82,11 @@ function buildLocationMessage(currentLocation) {
   let message;
 
   if (currentLocation && !lastKnownLocation) {
-    message = `Christian has arrived at ${currentLocation}`;
+    message = `** AUTO LOCATION UPDATE: Christian has arrived at ${currentLocation}`;
   } else if (!currentLocation && lastKnownLocation) {
-    message = `Christian has left ${lastKnownLocation}`;
+    message = `** AUTO LOCATION UPDATE: Christian has left ${lastKnownLocation}`;
   } else if (currentLocation && lastKnownLocation) {
-    message = `Christian has moved from ${lastKnownLocation} to ${currentLocation}`;
+    message = `** AUTO LOCATION UPDATE: Christian has moved from ${lastKnownLocation} to ${currentLocation}`;
   } else {
     message = null;
   }
