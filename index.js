@@ -23,28 +23,71 @@ const CONFIG = {
 // Fine for testing, but resets if Railway restarts.
 let lastKnownLocation = null;
 
-function parseLocationMappings() {
-  const mappings = [];
-  const env = process.env;
+const fs = require("fs");
+const path = require("path");
 
-  for (const key in env) {
-    if (key.endsWith("_LAT")) {
-      const prefix = key.slice(0, -4);
-      const lat = parseFloat(env[`${prefix}_LAT`]);
-      const lon = parseFloat(env[`${prefix}_LON`]);
-      const name = env[`${prefix}_NAME`];
-      const radius = parseFloat(env[`${prefix}_RADIUS_METERS`] || "300");
+function parseCsvLine(line) {
+  const result = [];
+  let current = "";
+  let inQuotes = false;
 
-      if (!isNaN(lat) && !isNaN(lon) && name) {
-        mappings.push({ lat, lon, name, radius });
-        console.log(`Loaded location: ${name} at ${lat}, ${lon}, radius ${radius}m`);
-      }
+  for (const char of line) {
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === "," && !inQuotes) {
+      result.push(current.trim());
+      current = "";
+    } else {
+      current += char;
     }
+  }
+
+  result.push(current.trim());
+  return result;
+}
+
+function parseLocationMappings() {
+  const filePath = path.join(__dirname, "places.csv");
+
+  if (!fs.existsSync(filePath)) {
+    console.warn("places.csv not found. No locations loaded.");
+    return [];
+  }
+
+  const csv = fs.readFileSync(filePath, "utf8");
+  const lines = csv
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(line => line && !line.startsWith("#"));
+
+  const header = parseCsvLine(lines.shift()).map(h => h.toLowerCase());
+
+  const nameIndex = header.indexOf("name");
+  const latIndex = header.indexOf("latitude");
+  const lonIndex = header.indexOf("longitude");
+  const radiusIndex = header.indexOf("radius_meters");
+
+  const mappings = [];
+
+  for (const line of lines) {
+    const cols = parseCsvLine(line);
+
+    const name = cols[nameIndex];
+    const lat = parseFloat(cols[latIndex]);
+    const lon = parseFloat(cols[lonIndex]);
+    const radius = parseFloat(cols[radiusIndex] || "300");
+
+    if (!name || isNaN(lat) || isNaN(lon)) {
+      console.warn(`Skipping invalid CSV row: ${line}`);
+      continue;
+    }
+
+    mappings.push({ name, lat, lon, radius });
+    console.log(`Loaded location: ${name} at ${lat}, ${lon}, radius ${radius}m`);
   }
 
   return mappings;
 }
-
 const LOCATION_MAPPINGS = parseLocationMappings();
 
 function distanceMeters(lat1, lon1, lat2, lon2) {
