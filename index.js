@@ -1,20 +1,9 @@
-// kinlife360: Receives location pings from your phone and sends
-// messages to your Kin about your whereabouts.
-//
-// Required env vars:
-//   KINDROID_API_KEY    - Your Kindroid API key
-//   KINDROID_AI_ID      - Kin's AI ID
-//
-// Location mappings (optional):
-//   HOME_LAT, HOME_LON, HOME_NAME
-//   WORK_LAT, WORK_LON, WORK_NAME
-//   (add as many as needed with this pattern)
-
 const express = require("express");
 
 const KINDROID_BASE = "https://api.kindroid.ai/v1";
+const app = express();
 
-// --- Config ---
+app.use(express.json());
 
 function requiredEnv(name) {
   const val = process.env[name];
@@ -30,43 +19,81 @@ const CONFIG = {
   aiId: requiredEnv("KINDROID_AI_ID"),
 };
 
-// --- Location mapping ---
+// In-memory state.
+// Fine for testing, but resets if Railway restarts.
+let lastKnownLocation = null;
 
 function parseLocationMappings() {
   const mappings = [];
   const env = process.env;
-  
+
   for (const key in env) {
-    if (key.endsWith('_LAT')) {
+    if (key.endsWith("_LAT")) {
       const prefix = key.slice(0, -4);
       const lat = parseFloat(env[`${prefix}_LAT`]);
       const lon = parseFloat(env[`${prefix}_LON`]);
       const name = env[`${prefix}_NAME`];
-      
+      const radius = parseFloat(env[`${prefix}_RADIUS_METERS`] || "300");
+
       if (!isNaN(lat) && !isNaN(lon) && name) {
-        mappings.push({ lat, lon, name });
-        console.log(`Loaded location: ${name} at ${lat}, ${lon}`);
+        mappings.push({ lat, lon, name, radius });
+        console.log(`Loaded location: ${name} at ${lat}, ${lon}, radius ${radius}m`);
       }
     }
   }
+
   return mappings;
 }
 
 const LOCATION_MAPPINGS = parseLocationMappings();
 
-function findNearestLocation(lat, lon) {
-  const threshold = 50; // ~300m radius
-  
+function distanceMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = deg => deg * Math.PI / 180;
+
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) ** 2;
+
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function findKnownLocation(lat, lon) {
   for (const loc of LOCATION_MAPPINGS) {
-    const distance = Math.sqrt(
-      Math.pow(lat - loc.lat, 2) + Math.pow(lon - loc.lon, 2)
-    );
-    if (distance < threshold) return loc.name;
+    const distance = distanceMeters(lat, lon, loc.lat, loc.lon);
+    if (distance <= loc.radius) {
+      return loc.name;
+    }
   }
+
   return null;
 }
 
-// --- Kindroid ---
+function buildLocationMessage(currentLocation) {
+  if (currentLocation === lastKnownLocation) {
+    return null; // duplicate, do not send
+  }
+
+  let message;
+
+  if (currentLocation && !lastKnownLocation) {
+    message = `Christian has arrived at ${currentLocation}`;
+  } else if (!currentLocation && lastKnownLocation) {
+    message = `Christian has left ${lastKnownLocation}`;
+  } else if (currentLocation && lastKnownLocation) {
+    message = `Christian has moved from ${lastKnownLocation} to ${currentLocation}`;
+  } else {
+    message = null;
+  }
+
+  lastKnownLocation = currentLocation;
+  return message;
+}
 
 async function sendMessage(text) {
   const res = await fetch(`${KINDROID_BASE}/send-message`, {
@@ -87,30 +114,45 @@ async function sendMessage(text) {
   }
 }
 
-// --- Express server ---
-
-const app = express();
-app.use(express.json());
-
 app.post("/api/log-location", async (req, res) => {
   const ts = new Date().toISOString();
-  
-  let latitude = req.body.latitude;
-  let longitude = req.body.longitude;
+
+  const latitude = parseFloat(req.body.latitude);
+  const longitude = parseFloat(req.body.longitude);
 
   console.log(`[${ts}] Raw body:`, JSON.stringify(req.body));
   console.log(`[${ts}] Location ping: ${latitude}, ${longitude}`);
 
+  if (isNaN(latitude) || isNaN(longitude)) {
+    return res.status(400).json({
+      error: "Missing or invalid latitude/longitude",
+    });
+  }
+
   try {
-    const knownLocation = findNearestLocation(latitude, longitude);
-    const message = knownLocation 
-      ? `📍**<Automated Update:** *Christian is at ${knownLocation}>*`
-      : `📍**<Automated Update:** *Christian is in transit.>*`;
+    const currentLocation = findKnownLocation(latitude, longitude);
+    const message = buildLocationMessage(currentLocation);
+
+    if (!message) {
+      console.log(`[${ts}] No change. Last location: ${lastKnownLocation || "unknown"}`);
+      return res.json({
+        success: true,
+        sent: false,
+        reason: "No location change",
+        currentLocation,
+      });
+    }
 
     await sendMessage(message);
+
     console.log(`[${ts}] Sent message: "${message}"`);
-    
-    res.json({ success: true, message });
+
+    res.json({
+      success: true,
+      sent: true,
+      message,
+      currentLocation,
+    });
   } catch (err) {
     console.error(`[${ts}] Error: ${err.message}`);
     res.status(500).json({ error: err.message });
@@ -118,14 +160,16 @@ app.post("/api/log-location", async (req, res) => {
 });
 
 app.get("/", (req, res) => {
-  res.json({ 
-    status: "ok", 
+  res.json({
+    status: "ok",
     service: "kinlife360",
-    mappings: LOCATION_MAPPINGS.length 
+    mappings: LOCATION_MAPPINGS.length,
+    lastKnownLocation,
   });
 });
 
 const PORT = process.env.PORT || 3000;
+
 app.listen(PORT, () => {
   console.log(`Location logger listening on port ${PORT}`);
   console.log(`Loaded ${LOCATION_MAPPINGS.length} location mappings`);
